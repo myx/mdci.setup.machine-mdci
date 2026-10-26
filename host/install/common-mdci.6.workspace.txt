@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:workspace: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:workspace: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# Configuration is configurable later: a failing step is a warning and the deploy goes on.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+mdciTools="$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+[ -x "$mdciTools" ] || {
+	echo "🙋 WARNING: mdci:workspace: the agents tooling $mdciTools is missing, nothing was configured" >&2
+	exit 0
+}
+
+# The permissions op merges into the user settings in the home and refuses without one, so an absent file is seeded empty; the project settings live in the workspace.
+{
+	mkdir -p "$MDCI_HOME/.claude" && \
+	{ [ -f "$MDCI_HOME/.claude/settings.json" ] || printf '{}\n' > "$MDCI_HOME/.claude/settings.json" ; } && \
+	chown "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME/.claude" "$MDCI_HOME/.claude/settings.json"
+} || echo "🙋 WARNING: mdci:workspace: the claude settings file was not seeded under $MDCI_HOME/.claude (exit $?)" >&2
+
+# -H names the account home, where the user settings and the trust record are written; the links and the project files go into the workspace.
+sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --install-workspace-integrations --scope workspace || \
+	echo "🙋 WARNING: mdci:workspace: --install-workspace-integrations did not reconcile (exit $?)" >&2
+
+# The restrictions are the hooks and the project settings of the workspace.
+sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --install-workspace-restrictions --workspace "$mdciWorkspace" || \
+	echo "🙋 WARNING: mdci:workspace: --install-workspace-restrictions did not reconcile (exit $?)" >&2
+
+# The calls after this fragment write as the account into what the root-run steps above created.
+chown -R "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME" || \
+	echo "🙋 WARNING: mdci:workspace: chown of $MDCI_HOME failed (exit $?)" >&2

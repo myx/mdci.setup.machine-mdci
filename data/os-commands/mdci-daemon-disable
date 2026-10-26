@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# A failed unmonitor leaves monit restarting the daemon after the stop, so it says so; the stop still runs.
+monit unmonitor mdcid || echo "🙋 WARNING: mdci-daemon-disable: monit unmonitor mdcid failed, monit may restart the daemon" >&2
+monit unmonitor mdcid-progress || echo "🙋 WARNING: mdci-daemon-disable: monit unmonitor mdcid-progress failed, monit still watches it" >&2
+sysrc mdcid_enable=NO
+service mdcid onestop

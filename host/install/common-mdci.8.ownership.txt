@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:ownership: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:ownership: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+
+# So the team-data, Slack and daemon steps after it can write as the account.
+MdciStop() { echo "⛔ ERROR: mdci:ownership: $1 failed (exit $2)" >&2 ; exit 1 ; }
+chown -R "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME" || MdciStop "chown of $MDCI_HOME" "$?"
+# The workspace is shared by the account group, except the files the workspace installer made immutable, which chmod cannot change.
+find "$mdciWorkspace" ! -type l ! -flags +uchg -exec chmod ug=rwX {} + || MdciStop "chmod of $mdciWorkspace" "$?"

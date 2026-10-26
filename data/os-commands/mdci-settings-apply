@@ -1,0 +1,24 @@
+#!/bin/sh
+
+##
+## Applies the rig settings a deploy deliberately does not carry -- a credential
+## in a deploy lands in the generated installer and in the deploy log. Values
+## are read from stdin as KEY=VALUE lines, so none of them reaches argv.
+##
+
+set -e
+
+MDCI_HOME="${MDCI_HOME:-/usr/local/mdci}"
+## The workspace is workspace.mdci in the home, found by that path.
+MDCI_WORKSPACE="$MDCI_HOME/workspace.mdci"
+MDCI_TOOLS="$MDCI_WORKSPACE/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+
+if [ -z "$1" ] ; then
+	echo "⛔ ERROR: mdci-settings-apply: the setup domain is required" >&2
+	echo "📘 syntax: mdci-settings-apply <setup-domain>   -- KEY=VALUE lines on stdin" >&2
+	echo "  what a domain takes, and where each key is stored:" >&2
+	echo "    $MDCI_TOOLS --owner-setup-<domain> --print-apply-command" >&2
+	exit 1
+fi
+
+exec "$MDCI_TOOLS" --owner-setup-"$1" --workspace-root "$MDCI_WORKSPACE" --values-from-stdin --apply

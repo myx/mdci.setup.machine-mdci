@@ -1,0 +1,6 @@
+#!/bin/sh
+
+sysrc mdcid_enable=YES
+service mdcid start || exit
+monit monitor mdcid
+monit monitor mdcid-progress

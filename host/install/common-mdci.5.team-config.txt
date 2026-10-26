@@ -1,0 +1,64 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:team-config: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:team-config: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# Configuration is configurable later: a missing tool or value is a warning and the deploy goes on.
+mdciTools="$MDCI_HOME/workspace.mdci/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+[ -x "$mdciTools" ] || {
+	echo "🙋 WARNING: mdci:team-config: the agents tooling $mdciTools is missing, nothing was configured" >&2
+	exit 0
+}
+
+# Values go on stdin, never as flags, because ps is world readable. An undeclared value writes nothing.
+MdciUpsertSetting() {
+	[ -n "$3" ] || return 0
+	printf '%s' "$3" | sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" \
+		--agents-config-option "$1" --upsert-from-stdin "$2" || \
+		echo "🙋 WARNING: mdci:team-config: setting $2 of $1 was not written (exit $?)" >&2
+	return 0
+}
+
+# The team scope. The spawn service, the presets with their credentials and the tiers are 7.spawn's.
+MdciUpsertSetting magic-team TEAM_DATA_GIT_REMOTE "${MDCI_TEAM_DATA_GIT_REMOTE:-}"
+MdciUpsertSetting magic-team TEAM_DATA_BRANCH "${MDCI_TEAM_DATA_BRANCH:-}"
+MdciUpsertSetting magic-team SLACK_APP_TOKEN "${MDCI_SLACK_APP_TOKEN:-}"
+MdciUpsertSetting magic-team SLACK_CHANNEL_MAGIC_TEAM "${MDCI_SLACK_CHANNEL_MAGIC_TEAM:-}"
+MdciUpsertSetting magic-team SLACK_CHANNEL_HUMAN_OWNER "${MDCI_SLACK_CHANNEL_HUMAN_OWNER:-}"
+MdciUpsertSetting magic-team SLACK_CHANNEL_EVENT_TRACK "${MDCI_SLACK_CHANNEL_EVENT_TRACK:-}"
+MdciUpsertSetting magic-team SLACK_CHANNEL_EVENT_ALERT "${MDCI_SLACK_CHANNEL_EVENT_ALERT:-}"
+MdciUpsertSetting magic-team CONFLUENCE_SPACE "${MDCI_CONFLUENCE_SPACE:-}"
+MdciUpsertSetting magic-team MDAT_WORKSPACE_MODE "${MDCI_MDAT_WORKSPACE_MODE:-}"
+# The schedule, where the instance declares it; unset, the tooling's defaults stand (the host's zone, sat,sun, 09:00 18:00 mon-fri).
+MdciUpsertSetting magic-team MDAT_SCHEDULE_TIMEZONE "${MDCI_SCHEDULE_TIMEZONE:-}"
+MdciUpsertSetting magic-team MDAT_SCHEDULE_WEEKEND "${MDCI_SCHEDULE_WEEKEND:-}"
+MdciUpsertSetting magic-team MDAT_SCHEDULE_WORKTIME "${MDCI_SCHEDULE_WORKTIME:-}"
+MdciUpsertSetting magic-team MDAT_SCHEDULE_COUNTRY "${MDCI_SCHEDULE_COUNTRY:-}"
+
+# The human-owner scope holds one setting, its mail address; the owner is no team member of the loop below.
+MdciUpsertSetting human-owner EMAIL_USER "${MDCI_HUMAN_OWNER_EMAIL_USER:-}"
+
+[ -n "${MDCI_TEAM_MEMBERS:-}" ] || echo "🙋 WARNING: mdci:team-config: MDCI_TEAM_MEMBERS is not set, no member setting was written" >&2
+
+# A member value is MDCI_<MEMBER>_<KEY> with dashes as underscores, else the flat MDCI_<KEY>; the Slack bot pair has no flat form.
+mdciMemberOptions="SLACK_USER_TOKEN SLACK_BOT_TOKEN SLACK_WORKSPACE_DOMAIN EMAIL_IMAP_HOST EMAIL_SMTP_HOST EMAIL_SMTP_PORT EMAIL_USER EMAIL_APP_PASSWORD TRELLO_KEY TRELLO_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN CONFLUENCE_SITE CONFLUENCE_USER CONFLUENCE_API_TOKEN JIRA_SITE JIRA_USER JIRA_API_TOKEN"
+for mdciMember in ${MDCI_TEAM_MEMBERS:-} ; do
+	# The name reaches eval below, so only lower case letters, digits and dashes pass.
+	case "$mdciMember" in
+		*[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
+			echo "🙋 WARNING: mdci:team-config: member $mdciMember was skipped, a name holds only lower case letters, digits and dashes" >&2
+			continue
+		;;
+	esac
+	mdciMemberVar="$( printf '%s' "$mdciMember" | tr 'a-z-' 'A-Z_' )"
+	for mdciOption in $mdciMemberOptions ; do
+		eval "mdciMemberValue=\"\${MDCI_${mdciMemberVar}_${mdciOption}:-}\""
+		case "$mdciOption" in
+			SLACK_BOT_TOKEN|SLACK_WORKSPACE_DOMAIN) ;;
+			*) [ -n "$mdciMemberValue" ] || eval "mdciMemberValue=\"\${MDCI_${mdciOption}:-}\"" ;;
+		esac
+		MdciUpsertSetting "$mdciMember" "$mdciOption" "$mdciMemberValue"
+	done
+done

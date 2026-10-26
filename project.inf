@@ -1,0 +1,43 @@
+Name: setup.machine-mdci
+Info: mdci -- the team work-server machine: a configurable main workspace with empty sources, an installed magic-team, and a daemon running the unattended main loop
+Requires: \
+	standard/setup.machine-freebsd \
+	standard/setup.feature-myx.common \
+	standard/setup.feature-monit \
+
+Provides: \
+	standard/setup.machine-mdci \
+	\
+	image-install:context-variable:OS_PACKAGES:insert:git \
+	image-install:context-variable:OS_PACKAGES:insert:python3 \
+	\
+	image-install:context-variable:MDCI_HOME:create:/usr/local/mdci \
+	image-install:context-variable:MDCI_ACCOUNT:create:mdci \
+	image-install:context-variable:MDCI_ACCOUNT_UID:create:181 \
+	image-install:context-variable:MDCI_SPAWN_CLI_SERVICE:create:scaleway \
+	\
+	image-install:context-variable:MDCI_EMAIL_IMAP_HOST:create:imap.gmail.com \
+	image-install:context-variable:MDCI_EMAIL_SMTP_HOST:create:smtp.gmail.com \
+	image-install:context-variable:MDCI_EMAIL_SMTP_PORT:create:587 \
+	\
+	image-prepare:sync-source-files:**:data/deploy-keys:deploy-keys \
+	image-install:deploy-sync-files:deploy-keys:/usr/local/mdci-files/mdci-deploy-keys \
+	\
+	image-install:exec-update-before:host/install/common-mdci.0.prepare.txt \
+	image-install:exec-update-before:host/install/common-mdci.1.deploy-keys.txt \
+	image-install:exec-update-before:host/install/common-mdci.2.install.txt \
+	image-install:exec-update-before:host/install/common-mdci.3.sources.txt \
+	image-install:exec-update-before:host/install/common-mdci.4.agents.txt \
+	image-install:exec-update-before:host/install/common-mdci.5.team-config.txt \
+	image-install:exec-update-before:host/install/common-mdci.6.workspace.txt \
+	image-install:exec-update-before:host/install/common-mdci.7.spawn.txt \
+	image-install:exec-update-before:host/install/common-mdci.8.ownership.txt \
+	image-install:exec-update-before:host/install/common-mdci.9.team-data.txt \
+	image-install:exec-update-before:host/install/common-mdci.10.daemon.txt \
+
+Keywords: \
+	mdci \
+	mdci-machine \
+	deploy.mdci \
+
+Includes:

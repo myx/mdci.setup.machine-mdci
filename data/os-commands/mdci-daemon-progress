@@ -1,0 +1,4 @@
+#!/bin/sh
+
+service mdcid enabled || exit 0
+[ -n "$( find "/usr/local/mdci/.daemon.progress" -mmin -70 2>/dev/null )" ]

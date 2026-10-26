@@ -1,0 +1,47 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:team-data: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:team-data: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+mdciTools="$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+
+# Storage and Slack are configurable later: a missing value or a failed setup is a warning, and the deploy goes on. The team data directory is the variable when set, else the tooling default inside the workspace; it is created empty and never cloned here.
+if [ -n "${MDCI_TEAM_DATA_DIRECTORY:-}" ] ; then
+	# A relative directory is taken against the workspace root, as the tool resolves it.
+	case "$MDCI_TEAM_DATA_DIRECTORY" in
+		/*) mdciTeamDataPath="$MDCI_TEAM_DATA_DIRECTORY" ;;
+		*) mdciTeamDataPath="$mdciWorkspace/$MDCI_TEAM_DATA_DIRECTORY" ;;
+	esac
+else
+	mdciTeamDataPath="$mdciWorkspace/.local/agents/team-data-root"
+fi
+# As the account, so the storage call below can write into it.
+sudo -u "$MDCI_ACCOUNT" -H mkdir -p "$mdciTeamDataPath" || echo "🙋 WARNING: mdci:team-data: could not create $mdciTeamDataPath (exit $?)" >&2
+# The store is the account's, and the users of the host sync it from their consoles too: git refuses a repository another user owns, so the system config names it safe, once.
+git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$mdciTeamDataPath" || \
+	git config --system --add safe.directory "$mdciTeamDataPath" || echo "🙋 WARNING: mdci:team-data: could not mark $mdciTeamDataPath safe for git (exit $?)" >&2
+set -- --workspace-root "$mdciWorkspace"
+[ -z "${MDCI_TEAM_DATA_DIRECTORY:-}" ] || set -- "$@" --team-data-directory "$MDCI_TEAM_DATA_DIRECTORY"
+[ -z "${MDCI_TEAM_DATA_GIT_REMOTE:-}" ] || set -- "$@" --team-data-git-remote "$MDCI_TEAM_DATA_GIT_REMOTE"
+# --apply stays last: a flag after it is an error.
+sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --owner-setup-storage "$@" --apply || \
+	echo "🙋 WARNING: mdci:team-data: --owner-setup-storage did not complete (exit $?)" >&2
+
+if [ -n "${MDCI_SLACK_CHANNEL_MAGIC_TEAM:-}" ] && [ -n "${MDCI_SLACK_CHANNEL_HUMAN_OWNER:-}" ] ; then
+	set -- --workspace-root "$mdciWorkspace" \
+		--slack-channel-magic-team "$MDCI_SLACK_CHANNEL_MAGIC_TEAM" \
+		--slack-channel-human-owner "$MDCI_SLACK_CHANNEL_HUMAN_OWNER"
+	[ -z "${MDCI_SLACK_CHANNEL_EVENT_TRACK:-}" ] || set -- "$@" --slack-channel-event-track "$MDCI_SLACK_CHANNEL_EVENT_TRACK"
+	[ -z "${MDCI_SLACK_CHANNEL_EVENT_ALERT:-}" ] || set -- "$@" --slack-channel-event-alert "$MDCI_SLACK_CHANNEL_EVENT_ALERT"
+	# The channel ids are flags; the two secrets go on stdin, and the domain takes both or neither.
+	{
+		[ -z "${MDCI_SLACK_BOT_TOKEN:-}" ] || printf '%s\n' "SLACK_BOT_TOKEN=${MDCI_SLACK_BOT_TOKEN}"
+		[ -z "${MDCI_SLACK_WORKSPACE_DOMAIN:-}" ] || printf '%s\n' "SLACK_WORKSPACE_DOMAIN=${MDCI_SLACK_WORKSPACE_DOMAIN}"
+	} | sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --owner-setup-slack "$@" --values-from-stdin --apply || \
+		echo "🙋 WARNING: mdci:team-data: --owner-setup-slack did not complete (exit $?)" >&2
+else
+	echo "🙋 WARNING: mdci:team-data: MDCI_SLACK_CHANNEL_MAGIC_TEAM or MDCI_SLACK_CHANNEL_HUMAN_OWNER is not set, no Slack setup was done" >&2
+fi

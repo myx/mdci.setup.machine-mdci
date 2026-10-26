@@ -1,0 +1,73 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:deploy-keys: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:deploy-keys: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# A deploy key is configurable later: a missing input or a failed step is a warning and the deploy goes on.
+if [ -z "${MDCI_FILES_PATH:-}" ] ; then
+	echo "🙋 WARNING: mdci:deploy-keys: MDCI_FILES_PATH is not set, no deploy key was placed" >&2
+	exit 0
+fi
+
+mdciKeysStaged="${MDCI_FILES_PATH}/mdci-deploy-keys"
+mdciKeysHome="${MDCI_HOME}/deploy-keys"
+
+if [ ! -d "$mdciKeysStaged" ] ; then
+	echo "🙋 WARNING: mdci:deploy-keys: $mdciKeysStaged is not on this host, no deploy key was placed" >&2
+	exit 0
+fi
+
+echo "mdci:deploy-keys: syncing $mdciKeysStaged" >&2
+mkdir -p "$mdciKeysHome" || echo "🙋 WARNING: mdci:deploy-keys: could not create $mdciKeysHome (exit $?)" >&2
+# The second hop sets the mode and owner the staging sync cannot, so a private key is never group readable.
+rsync -rltOoDi --delete --exclude=README.md --chmod=u=rX,go= --chown="${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" \
+	"$mdciKeysStaged/" "$mdciKeysHome/" || echo "🙋 WARNING: mdci:deploy-keys: the sync into $mdciKeysHome failed (exit $?)" >&2
+chown -R "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$mdciKeysHome" || echo "🙋 WARNING: mdci:deploy-keys: chown of $mdciKeysHome failed (exit $?)" >&2
+chmod -R u=rX,go= "$mdciKeysHome" || echo "🙋 WARNING: mdci:deploy-keys: chmod of $mdciKeysHome failed (exit $?)" >&2
+
+[ -f "$mdciKeysHome/known_hosts" ] || echo "🙋 WARNING: mdci:deploy-keys: $mdciKeysHome/known_hosts is missing, every clone over ssh will be refused" >&2
+
+if [ ! -f "$mdciKeysHome/$MDCI_ACCOUNT" ] ; then
+	echo "🙋 WARNING: mdci:deploy-keys: private key $mdciKeysHome/$MDCI_ACCOUNT is missing, the git ssh command was not set" >&2
+	exit 0
+fi
+
+# Set from / because the bundle directory is a git checkout and a global write must not walk into it.
+if ( cd / && sudo -u "$MDCI_ACCOUNT" -H git config --global core.sshCommand \
+	"ssh -i $mdciKeysHome/$MDCI_ACCOUNT -o UserKnownHostsFile=$mdciKeysHome/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes" ) ; then
+	echo "mdci:deploy-keys: git ssh command set for $MDCI_ACCOUNT" >&2
+else
+	echo "🙋 WARNING: mdci:deploy-keys: setting the git ssh command for $MDCI_ACCOUNT failed (exit $?)" >&2
+fi
+
+# A pull that finds both sides moved merges, never rebases and never stops on the choice: the team data is synced by plain pulls.
+if ( cd / && sudo -u "$MDCI_ACCOUNT" -H git config --global pull.rebase false ) ; then
+	echo "mdci:deploy-keys: git pull set to merge for $MDCI_ACCOUNT" >&2
+else
+	echo "🙋 WARNING: mdci:deploy-keys: setting git pull to merge for $MDCI_ACCOUNT failed (exit $?)" >&2
+fi
+
+# The same key for a plain ssh, which a tool that sets GIT_SSH_COMMAND itself uses instead of core.sshCommand: one managed block of the account's ssh config, replaced on every run.
+mdciSshConfig="$MDCI_HOME/.ssh/config"
+mdciSshBlock="# mdci:deploy-keys managed block, rewritten by every deploy
+Host github.com bitbucket.org
+	IdentityFile $mdciKeysHome/$MDCI_ACCOUNT
+	IdentitiesOnly yes
+	UserKnownHostsFile $mdciKeysHome/known_hosts
+	GlobalKnownHostsFile /dev/null
+	StrictHostKeyChecking yes
+# mdci:deploy-keys managed block end"
+if {
+	mkdir -p "$MDCI_HOME/.ssh" && \
+	{ [ ! -f "$mdciSshConfig" ] || awk '/^# mdci:deploy-keys managed block, /{skip=1} !skip{print} /^# mdci:deploy-keys managed block end$/{skip=0}' "$mdciSshConfig" ; } > "$mdciSshConfig.mdci.$$" && \
+	printf '%s\n' "$mdciSshBlock" >> "$mdciSshConfig.mdci.$$" && \
+	mv "$mdciSshConfig.mdci.$$" "$mdciSshConfig" && \
+	chown "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME/.ssh" "$mdciSshConfig" && chmod 700 "$MDCI_HOME/.ssh" && chmod 600 "$mdciSshConfig"
+} ; then
+	echo "mdci:deploy-keys: ssh config set for $MDCI_ACCOUNT" >&2
+else
+	rm -f "$mdciSshConfig.mdci.$$"
+	echo "🙋 WARNING: mdci:deploy-keys: setting the ssh config for $MDCI_ACCOUNT failed (exit $?)" >&2
+fi

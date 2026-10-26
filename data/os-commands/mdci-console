@@ -1,0 +1,33 @@
+#!/bin/sh
+
+##
+## A console session of the workspace, for root and for the USER_LIST users, who
+## are the members of the account group. Root gets it as the rig account: the
+## account shell is sh and the console line ends its .bash_profile, so a login
+## bash of the account is started; in a screen window the login include starts
+## no screen. A member gets the console as that member, since no sudo rule lets
+## the group act as the account.
+##
+
+set -e
+
+MDCI_HOME="${MDCI_HOME:-/usr/local/mdci}"
+MDCI_USER="$( sysrc -n mdcid_user 2>/dev/null || echo mdci )"
+## The workspace is workspace.mdci in the home, found by that path.
+MDCI_WORKSPACE="$MDCI_HOME/workspace.mdci"
+
+if [ "$( id -u )" = 0 ] ; then
+	exec sudo -u "$MDCI_USER" -H -i bash -l
+fi
+
+## The account group has the name of the account.
+case " $( id -Gn ) " in
+	*" $MDCI_USER "*) ;;
+	*)
+		echo "⛔ ERROR: mdci-console: only root and the members of the group $MDCI_USER can run it" >&2
+		exit 1
+	;;
+esac
+
+export MMDAPP="$MDCI_WORKSPACE"
+exec "$MDCI_WORKSPACE/DistroSourceConsole.sh"

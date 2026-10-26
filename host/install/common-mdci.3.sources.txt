@@ -1,0 +1,97 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:sources: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:sources: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# Checkouts are configurable later: a missing console, key or clone is a warning and the deploy goes on.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+mdciSourceConsole="$mdciWorkspace/DistroSourceConsole.sh"
+[ -x "$mdciSourceConsole" ] || {
+	echo "🙋 WARNING: mdci:sources: the source console $mdciSourceConsole is missing, no source was set up" >&2
+	exit 0
+}
+
+if [ -z "${MDCI_SOURCE_ROOTS:-}${MDCI_SOURCE_REPOS:-}" ] ; then
+	echo "🙋 WARNING: mdci:sources: this instance declares no MDCI_SOURCE_ROOTS and no MDCI_SOURCE_REPOS, the workspace stays empty" >&2
+	exit 0
+fi
+
+# The clones use the deploy key 1.deploy-keys set as the git ssh command, else the key generated here at the ssh default path.
+mdciKeyFile="$MDCI_HOME/deploy-keys/$MDCI_ACCOUNT"
+[ -f "$mdciKeyFile" ] || mdciKeyFile="$MDCI_HOME/.ssh/id_ed25519"
+
+if [ -n "${MDCI_SOURCE_REPOS:-}" ] && [ ! -f "$mdciKeyFile" ] ; then
+	sudo -u "$MDCI_ACCOUNT" -H mkdir -p "$MDCI_HOME/.ssh" || echo "🙋 WARNING: mdci:sources: could not create $MDCI_HOME/.ssh (exit $?)" >&2
+	sudo -u "$MDCI_ACCOUNT" -H chmod 700 "$MDCI_HOME/.ssh" || echo "🙋 WARNING: mdci:sources: could not set the mode of $MDCI_HOME/.ssh (exit $?)" >&2
+	sudo -u "$MDCI_ACCOUNT" -H ssh-keygen -t ed25519 -N '' -C "$MDCI_ACCOUNT@$( hostname )" -f "$mdciKeyFile" > /dev/null || \
+		echo "🙋 WARNING: mdci:sources: could not generate the git key $mdciKeyFile (exit $?)" >&2
+fi
+
+# Prints the problem and, when repositories are declared, the public key the clones use.
+MdciKeyWarning() {
+	echo "🙋 WARNING: mdci:sources: $1" >&2
+	[ -n "${MDCI_SOURCE_REPOS:-}" ] || return 0
+	mdciKeyText="$( cat "$mdciKeyFile.pub" 2> /dev/null || ssh-keygen -y -f "$mdciKeyFile" 2> /dev/null )" || :
+	if [ -n "$mdciKeyText" ] ; then
+		echo "🙋 WARNING: mdci:sources: public key of $mdciKeyFile: $mdciKeyText" >&2
+	else
+		echo "🙋 WARNING: mdci:sources: no public key could be read for $mdciKeyFile" >&2
+	fi
+}
+
+# One console line per root: a line naming several roots would run the rest as shell commands.
+{ echo 'set -e' ; for mdciRoot in ${MDCI_SOURCE_ROOTS:-} ; do
+	echo "Source DistroSourceTools --register-repository-roots $mdciRoot"
+done ; } | sudo -u "$MDCI_ACCOUNT" -H "$mdciSourceConsole" --non-interactive || \
+	echo "🙋 WARNING: mdci:sources: registering the source roots did not complete (exit $?)" >&2
+
+# Each entry is project,url with the comma escaped by the generator, so the project half ends in a backslash to strip.
+mdciRepoList="$MDCI_HOME/.mdci-repo-list.txt"
+if ! { for mdciRepo in ${MDCI_SOURCE_REPOS:-} ; do
+	mdciRepoProject="${mdciRepo%%,*}"
+	printf '%s\t%s\n' "${mdciRepoProject%\\}" "${mdciRepo#*,}"
+done > "$mdciRepoList" && chown "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$mdciRepoList" ; } ; then
+	echo "🙋 WARNING: mdci:sources: could not write $mdciRepoList, the repositories were not synced" >&2
+	exit 0
+fi
+
+# The declared list stays on the host for mdci-public-keys, which names what the key is for after a sync that cloned nothing.
+{ cp "$mdciRepoList" "$MDCI_HOME/.mdci-source-repos.txt" && chown "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME/.mdci-source-repos.txt" ; } || \
+	echo "🙋 WARNING: mdci:sources: could not keep the repository list for mdci-public-keys (exit $?)" >&2
+
+# A repository the deploy key cannot read yet is named once, with the key, and left out of the sync: listing the key is a step of the human-owner.
+mdciReadable="$mdciRepoList.readable"
+: > "$mdciReadable"
+mdciUnreadable=
+while IFS="$( printf '\t' )" read -r mdciRepoProject mdciRepoUrl ; do
+	if sudo -u "$MDCI_ACCOUNT" -H env GIT_TERMINAL_PROMPT=0 git ls-remote "$mdciRepoUrl" HEAD > /dev/null 2>&1 ; then
+		printf '%s\t%s\n' "$mdciRepoProject" "$mdciRepoUrl" >> "$mdciReadable"
+	else
+		mdciUnreadable="$mdciUnreadable $mdciRepoProject"
+	fi
+done < "$mdciRepoList"
+[ -z "$mdciUnreadable" ] || MdciKeyWarning "the deploy key cannot read the repository, left out of the sync:$mdciUnreadable"
+
+# The console reads its own commands from stdin, so the list goes through a file. The sync succeeds whatever its clones did, so the disk is checked.
+mdciSyncFailed=
+mdciUncloned=
+if [ -s "$mdciReadable" ] ; then
+	echo "Distro DistroImageSync --execute-from-stdin-repo-list < $mdciReadable" \
+		| sudo -u "$MDCI_ACCOUNT" -H "$mdciSourceConsole" --non-interactive || mdciSyncFailed=1
+	while IFS="$( printf '\t' )" read -r mdciRepoProject mdciRepoUrl ; do
+		[ -d "$mdciWorkspace/source/$mdciRepoProject/.git" ] || mdciUncloned="$mdciUncloned $mdciRepoProject"
+	done < "$mdciReadable"
+fi
+rm -f "$mdciRepoList" "$mdciReadable"
+[ -z "$mdciSyncFailed$mdciUncloned" ] || MdciKeyWarning "the repository sync did not complete, not in the workspace:${mdciUncloned:- none}"
+
+# Source prepare and pull needs a repository in the workspace, and the tool rejects an empty one.
+if [ -n "$( find "$mdciWorkspace/source" -maxdepth 3 -name .git -type d 2> /dev/null | head -n 1 )" ] ; then
+	echo "Distro DistroImageSync --all-tasks --execute-source-prepare-pull" \
+		| sudo -u "$MDCI_ACCOUNT" -H "$mdciSourceConsole" --non-interactive || \
+		MdciKeyWarning "source prepare and pull did not complete for every root (exit $?)"
+elif [ -z "$mdciUnreadable" ] ; then
+	echo "🙋 WARNING: mdci:sources: no repository is in the workspace, source prepare and pull was skipped" >&2
+fi

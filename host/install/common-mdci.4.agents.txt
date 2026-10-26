@@ -1,0 +1,34 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:agents: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:agents: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# The workspace is workspace.mdci in the home, never the home itself.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+
+# Every deploy reinstalls the agents tooling idempotently, as every installer does: a missing one is installed, an existing one is brought up to date.
+# Stops the deploy where the agents tooling cannot be installed: every later team fragment needs it.
+echo "mdci:agents: running the workspace installer for the agents tooling under $mdciWorkspace" >&2
+# Captured before it runs, because a failed download piped into a shell reports success.
+mdciWorkspaceInstaller="$( fetch -q -o - https://raw.githubusercontent.com/myx/myx.distro-.local/refs/heads/main/sh-scripts/workspace-install.sh )" || {
+	echo "⛔ ERROR: mdci:agents: downloading the workspace installer failed (exit $?)" >&2
+	exit 1
+}
+[ -n "$mdciWorkspaceInstaller" ] || { echo "⛔ ERROR: mdci:agents: the workspace installer download is empty" >&2 ; exit 1 ; }
+printf "agents exec true\n" | ( cd "$mdciWorkspace" && sudo -u "$MDCI_ACCOUNT" -H env TGT_APP_PATH="$mdciWorkspace" \
+	bash -c "$mdciWorkspaceInstaller" -- --force --git-clone --config-stdin ) || {
+	mdciInstallerStatus="$?"
+	# The installer can end late, in the skillset discovery that needs a source repository, after the tooling is in place.
+	[ -e "$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh" ] || {
+		echo "⛔ ERROR: mdci:agents: the workspace installer failed (exit $mdciInstallerStatus)" >&2
+		exit 1
+	}
+	echo "🙋 WARNING: mdci:agents: the workspace installer ended with exit $mdciInstallerStatus after the agents tooling was installed" >&2
+}
+[ -e "$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh" ] || {
+	echo "⛔ ERROR: mdci:agents: the installer did not produce: $mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh" >&2
+	ls -la "$mdciWorkspace/.local/myx" >&2 || :
+	exit 1
+}

@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:daemon: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:daemon: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# Stops the deploy where the daemon cannot be installed: the toolchain and the service lines.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+mdciTools="$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+[ -x "$mdciTools" ] || { echo "⛔ ERROR: mdci:daemon: the agents toolchain is not installed: $mdciTools" >&2 ; exit 1 ; }
+
+MdciStop() { echo "⛔ ERROR: mdci:daemon: $1 failed (exit $2)" >&2 ; exit 1 ; }
+# sysrc -n reads the value stored in rc.conf, never the default the rc.d script falls back to, telling a never-set host apart from an enabled or disabled one; rc.subr reads YES, TRUE, ON and 1, case-insensitively, as enabled.
+if mdciEnable="$( sysrc -n mdcid_enable 2>/dev/null )" ; then
+	case "$mdciEnable" in
+		[Yy][Ee][Ss] | [Tt][Rr][Uu][Ee] | [Oo][Nn] | 1) mdciSkipRestart=0 ;;
+		*) mdciSkipRestart=1 ;;
+	esac
+else
+	sysrc mdcid_enable="YES" || MdciStop "sysrc mdcid_enable" "$?"
+	mdciSkipRestart=0
+fi
+sysrc mdcid_user="$MDCI_ACCOUNT" || MdciStop "sysrc mdcid_user" "$?"
+sysrc mdcid_group="$MDCI_ACCOUNT" || MdciStop "sysrc mdcid_group" "$?"
+
+if [ "$mdciSkipRestart" = 1 ] ; then
+	echo "mdci:daemon: mdcid is disabled, leaving it stopped" >&2
+else
+	service mdcid restart || MdciStop "service mdcid restart" "$?"
+	# Status reports the supervisor, so it passes while the loop crash-loops; a warning only, it never stops the deploy.
+	service mdcid status > /dev/null 2>&1 || echo "🙋 WARNING: mdci:daemon: service mdcid does not report running after the restart" >&2
+fi

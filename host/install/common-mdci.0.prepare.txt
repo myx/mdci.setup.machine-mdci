@@ -1,0 +1,51 @@
+#!/bin/sh
+
+set -e
+
+# An empty MDCI_PKEY would stop the deploy inside installAuthorizedKey: a rig the next deploy cannot reach is not working.
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:prepare: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:prepare: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT_UID:-}" ] || { echo "⛔ ERROR: mdci:prepare: MDCI_ACCOUNT_UID is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_PKEY:-}" ] || { echo "⛔ ERROR: mdci:prepare: MDCI_PKEY is not set" >&2 ; exit 1 ; }
+
+# A step failing here stops the deploy: without the packages and the account the services cannot be installed.
+MdciStop() { echo "⛔ ERROR: mdci:prepare: $1 failed (exit $2)" >&2 ; exit 1 ; }
+
+# The workspace is workspace.mdci in the home, never the home itself, so the home settings, keys and credentials stay outside it.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+
+[ -z "${OS_PACKAGES:-}" ] || myx.common lib/installEnsurePackage $OS_PACKAGES || MdciStop "installing the packages" "$?"
+myx.common setup/server || MdciStop "setup/server" "$?"
+# The root account gets the same shell setup as the account and the users below.
+myx.common setup/client || MdciStop "setup/client for root" "$?"
+
+myx.common lib/installUser "$MDCI_ACCOUNT" "MDCI work-server account" "$MDCI_ACCOUNT_UID" "$MDCI_HOME" || MdciStop "creating the account $MDCI_ACCOUNT" "$?"
+mkdir -p "$mdciWorkspace" || MdciStop "creating the workspace $mdciWorkspace" "$?"
+
+# MMDAPP is not exported for every login: each tool takes its workspace from its own location.
+myx.common lib/replaceLine /etc/profile '^export MMDAPP' "# removed by mdci-setup ### export MMDAPP" || MdciStop "retiring MMDAPP in /etc/profile" "$?"
+
+# The account and every USER_LIST member get a console session in each screen window; membership of the account group is for the members only.
+for mdciUserName in $MDCI_ACCOUNT ${USER_LIST:-} ; do
+	echo "mdci:prepare: console for $mdciUserName" >&2
+	[ "$mdciUserName" = "$MDCI_ACCOUNT" ] || myx.common lib/installUserGroupMembership "$mdciUserName" "$MDCI_ACCOUNT" || MdciStop "adding $mdciUserName to the group $MDCI_ACCOUNT" "$?"
+	sudo -u "$mdciUserName" -H -s myx.common setup/client || MdciStop "setup/client for $mdciUserName" "$?"
+	sudo -u "$mdciUserName" -H -s mkdir -p '$HOME/.ssh/controlmasters' || MdciStop "creating the ssh controlmasters directory of $mdciUserName" "$?"
+	sudo -u "$mdciUserName" -H -s myx.common lib/replaceLine '$HOME/.profile' ' ### MMDAPP console autostart ###$' \
+		"# removed by mdci-setup ### MMDAPP console autostart ###" || MdciStop "retiring the .profile autostart of $mdciUserName" "$?"
+	# After setup/client on every deploy: replaceLine removes the line it matches and appends the new one, so the console line is the last of the profile, below the login line of setup/console that starts screen. MMDAPP is on the line because a sourced console cannot find its own folder.
+	sudo -u "$mdciUserName" -H -s myx.common lib/replaceLine '$HOME/.bash_profile' ' ### MMDAPP console autostart ###$' \
+		"test -x ${mdciWorkspace}/DistroSourceConsole.sh && MMDAPP=${mdciWorkspace} && . ${mdciWorkspace}/DistroSourceConsole.sh ### MMDAPP console autostart ###" || MdciStop "writing the .bash_profile autostart of $mdciUserName" "$?"
+done
+
+myx.common lib/installAuthorizedKey "$MDCI_ACCOUNT" "${MDCI_PKEY}" || MdciStop "installing the authorized key of $MDCI_ACCOUNT" "$?"
+
+# chown cannot touch a file flagged uchg, so the flag is cleared first.
+chflags -R nouchg "$MDCI_HOME" 2>/dev/null || :
+chown -R "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$MDCI_HOME" || MdciStop "chown of $MDCI_HOME" "$?"
+# The members of the account group pass through the home to the workspace; they cannot list the home, and its keys keep their own modes.
+chmod g+x "$MDCI_HOME" || MdciStop "chmod of $MDCI_HOME" "$?"
+
+# The two public github organisations are cloned over https, the private remotes keep their key. Run from / because a global write must not walk into a git checkout.
+( cd / && sudo -u "$MDCI_ACCOUNT" -H git config --global --replace-all url."https://github.com/myx/".insteadOf "git@github.com:myx/" ) || MdciStop "the https rewrite for github.com/myx" "$?"
+( cd / && sudo -u "$MDCI_ACCOUNT" -H git config --global --replace-all url."https://github.com/myx-distro-libs/".insteadOf "git@github.com:myx-distro-libs/" ) || MdciStop "the https rewrite for github.com/myx-distro-libs" "$?"

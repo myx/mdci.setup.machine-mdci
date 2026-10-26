@@ -1,0 +1,35 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:install: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:install: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# The workspace is workspace.mdci in the home, never the home itself.
+mdciWorkspace="$MDCI_HOME/workspace.mdci"
+
+# Every deploy reinstalls the console idempotently, as every installer does: a missing one is installed, an existing one is brought up to date.
+# Stops the deploy where the console cannot be installed: every later fragment needs it.
+echo "mdci:install: running the workspace installer under $mdciWorkspace" >&2
+# Captured before it runs, because a failed download piped into a shell reports success.
+mdciWorkspaceInstaller="$( fetch -q -o - https://raw.githubusercontent.com/myx/myx.distro-.local/refs/heads/main/sh-scripts/workspace-install.sh )" || {
+	echo "⛔ ERROR: mdci:install: downloading the workspace installer failed (exit $?)" >&2
+	exit 1
+}
+[ -n "$mdciWorkspaceInstaller" ] || { echo "⛔ ERROR: mdci:install: the workspace installer download is empty" >&2 ; exit 1 ; }
+printf "source exec true\n" | ( cd "$mdciWorkspace" && sudo -u "$MDCI_ACCOUNT" -H env TGT_APP_PATH="$mdciWorkspace" \
+	bash -c "$mdciWorkspaceInstaller" -- --force --git-clone --config-stdin ) || {
+	echo "⛔ ERROR: mdci:install: the workspace installer failed (exit $?)" >&2
+	exit 1
+}
+mdciMissing=
+for mdciArtifact in \
+	"$mdciWorkspace/DistroSourceConsole.sh" \
+	"$mdciWorkspace/.local/myx/myx.distro-source/sh-lib" \
+	"$mdciWorkspace/.local/myx/myx.common/os-myx.common" ; do
+	[ -e "$mdciArtifact" ] || { echo "⛔ ERROR: mdci:install: the installer did not produce: $mdciArtifact" >&2 ; mdciMissing=1 ; }
+done
+[ -z "$mdciMissing" ] || {
+	ls -la "$mdciWorkspace" "$mdciWorkspace/.local/myx" >&2 || :
+	exit 1
+}

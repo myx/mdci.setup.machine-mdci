@@ -1,0 +1,136 @@
+#!/bin/sh
+
+##
+## Prints what this rig holds for others to trust or to list, read as the rig
+## account: the public deploy key and the git repositories it is meant for, with
+## the answer of each repository to that key, then the ssh host keys of this
+## rig and the git servers the account trusts. Only public data is printed.
+## Root runs it as the account.
+##
+
+set -e
+
+MDCI_HOME="${MDCI_HOME:-/usr/local/mdci}"
+MDCI_USER="$( sysrc -n mdcid_user 2>/dev/null || echo mdci )"
+MDCI_WORKSPACE="$MDCI_HOME/workspace.mdci"
+
+if [ "$( id -u )" = 0 ] ; then
+	exec sudo -u "$MDCI_USER" -H "$0" "$@"
+fi
+
+if [ "$( id -un )" != "$MDCI_USER" ] ; then
+	echo "⛔ ERROR: mdci-public-keys: only root and the account $MDCI_USER can run it" >&2
+	exit 1
+fi
+
+## The account may start in a folder it cannot read.
+cd /
+
+## The key the account uses for git is the one its ssh command names, else the generated default.
+MdciKeyFile() {
+	mdciSshCommand="$( git config --global --get core.sshCommand 2> /dev/null )" || mdciSshCommand=
+	mdciNamed="$( printf '%s\n' "$mdciSshCommand" | sed -n 's/.* -i \([^ ]*\).*/\1/p' )"
+	if [ -n "$mdciNamed" ] ; then
+		printf '%s\n' "$mdciNamed"
+	elif [ -f "$MDCI_HOME/deploy-keys/$MDCI_USER" ] ; then
+		printf '%s\n' "$MDCI_HOME/deploy-keys/$MDCI_USER"
+	else
+		printf '%s\n' "$MDCI_HOME/.ssh/id_ed25519"
+	fi
+}
+
+## One public key: the line to paste, then its fingerprint. The public file is read, else it is derived from the private key.
+MdciPrintKey() {
+	mdciKeyText=
+	if [ -r "$1.pub" ] ; then
+		mdciKeyText="$( cat "$1.pub" )"
+	elif [ -r "$1" ] ; then
+		mdciKeyText="$( ssh-keygen -y -f "$1" 2> /dev/null )" || mdciKeyText=
+	fi
+	if [ -z "$mdciKeyText" ] ; then
+		echo "🙋 WARNING: mdci-public-keys: no public key could be read for $1" >&2
+		return 0
+	fi
+	echo "$1"
+	echo "  $mdciKeyText"
+	printf '%s\n' "$mdciKeyText" | ssh-keygen -l -f - 2> /dev/null | sed 's/^/  fingerprint: /' || :
+}
+
+## A repository, the page to list the key on, and whether the key can read it now.
+MdciPrintRepository() {
+	mdciRepoWhere="$( printf '%s\n' "$2" | sed -n -e 's#^[A-Za-z0-9_.-]*@\([^:/]*\):\(.*\)$#\1  \2#p' -e 's#^ssh://[A-Za-z0-9_.-]*@\([^:/]*\)\(:[0-9]*\)\{0,1\}/\(.*\)$#\1  \3#p' )"
+	if GIT_TERMINAL_PROMPT=0 git ls-remote "$2" HEAD > /dev/null 2>&1 ; then
+		mdciRepoState="the key can read it"
+	else
+		mdciRepoState="NOT readable with this key yet"
+	fi
+	printf '  %-22s %s\n' "$1" "$mdciRepoState"
+	printf '    %s\n' "$2"
+	[ -z "$mdciRepoWhere" ] || printf '    host and path: %s\n' "$mdciRepoWhere"
+}
+
+mdciKeyFile="$( MdciKeyFile )"
+
+echo "== the deploy key of this rig, to list as a deploy key on each repository below"
+MdciPrintKey "$mdciKeyFile"
+## The generated default is a different key when the ssh command names another one.
+if [ "$mdciKeyFile" != "$MDCI_HOME/.ssh/id_ed25519" ] && [ -f "$MDCI_HOME/.ssh/id_ed25519" ] ; then
+	echo
+	echo "== another key the account generated, not used for git unless a repository is set up with it"
+	MdciPrintKey "$MDCI_HOME/.ssh/id_ed25519"
+fi
+
+echo
+echo "== the repositories this key is meant for"
+mdciListed=
+## The declared source repositories are kept by 3.sources, as project and url on each line.
+if [ -r "$MDCI_HOME/.mdci-source-repos.txt" ] ; then
+	while IFS="$( printf '\t' )" read -r mdciRepoProject mdciRepoUrl ; do
+		[ -n "$mdciRepoUrl" ] || continue
+		MdciPrintRepository "$mdciRepoProject" "$mdciRepoUrl"
+		mdciListed=1
+	done < "$MDCI_HOME/.mdci-source-repos.txt"
+fi
+## The team data repository is a setting of the team.
+mdciTeamEnv="$MDCI_WORKSPACE/.local/.agents/magic-team.agent.env"
+mdciTeamRemote="$( sed -n 's/^TEAM_DATA_GIT_REMOTE=//p' "$mdciTeamEnv" 2> /dev/null | head -n 1 )"
+if [ -n "$mdciTeamRemote" ] ; then
+	MdciPrintRepository "team data" "$mdciTeamRemote"
+	mdciListed=1
+fi
+[ -n "$mdciListed" ] || echo "  none: this rig declares no source repository and no team data remote"
+
+echo
+echo "== the tool repositories mdci-update pulls with the same key (the origin of each installed clone)"
+mdciToolsFound=
+for mdciToolGit in "$MDCI_WORKSPACE"/.local/myx/*/.git "$MDCI_WORKSPACE"/.local/myx/*/*/.git ; do
+	[ -e "$mdciToolGit" ] || continue
+	mdciToolDir="${mdciToolGit%/.git}"
+	mdciToolUrl="$( git -C "$mdciToolDir" remote get-url origin 2> /dev/null )" || continue
+	[ -n "$mdciToolUrl" ] || continue
+	MdciPrintRepository "${mdciToolDir##*/}" "$mdciToolUrl"
+	mdciToolsFound=1
+done
+[ -n "$mdciToolsFound" ] || echo "  none: no installed tool clone with an origin was found under $MDCI_WORKSPACE/.local/myx"
+
+echo
+echo "== ssh host keys of this rig, for the known_hosts of those who connect (add the port when it is not 22)"
+mdciHostName="$( hostname )"
+mdciHostFound=
+for mdciHostKey in /etc/ssh/ssh_host_*_key.pub ; do
+	[ -r "$mdciHostKey" ] || continue
+	printf '%s %s\n' "$mdciHostName" "$( cut -d ' ' -f 1,2 "$mdciHostKey" )"
+	mdciHostFound=1
+done
+[ -n "$mdciHostFound" ] || echo "🙋 WARNING: mdci-public-keys: no ssh host key was found in /etc/ssh" >&2
+
+echo
+echo "== git servers this account trusts, by fingerprint"
+for mdciKnown in "$MDCI_HOME/deploy-keys/known_hosts" "$MDCI_HOME/.ssh/known_hosts" ; do
+	if [ -r "$mdciKnown" ] ; then
+		echo "$mdciKnown"
+		ssh-keygen -l -f "$mdciKnown" 2> /dev/null | sed 's/^/  /' || :
+	else
+		echo "🙋 WARNING: mdci-public-keys: $mdciKnown is not readable or missing" >&2
+	fi
+done

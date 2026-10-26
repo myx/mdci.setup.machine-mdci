@@ -1,0 +1,69 @@
+#!/bin/sh
+
+set -e
+
+[ -n "${MDCI_HOME:-}" ] || { echo "⛔ ERROR: mdci:spawn: MDCI_HOME is not set" >&2 ; exit 1 ; }
+[ -n "${MDCI_ACCOUNT:-}" ] || { echo "⛔ ERROR: mdci:spawn: MDCI_ACCOUNT is not set" >&2 ; exit 1 ; }
+
+# The spawn settings are configurable later: a missing tool or value is a warning and the deploy goes on.
+mdciTools="$MDCI_HOME/workspace.mdci/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+[ -x "$mdciTools" ] || {
+	echo "🙋 WARNING: mdci:spawn: the agents tooling $mdciTools is missing, no spawn setting was written" >&2
+	exit 0
+}
+
+# Values go on stdin, never as flags, because ps is world readable. An undeclared value writes nothing. No value is printed.
+MdciUpsertSetting() {
+	[ -n "$3" ] || return 0
+	printf '%s' "$3" | sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" \
+		--agents-config-option "$1" --upsert-from-stdin "$2" || \
+		echo "🙋 WARNING: mdci:spawn: setting $2 of $1 was not written (exit $?)" >&2
+	return 0
+}
+MdciDeleteSetting() {
+	sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --agents-config-option "$1" --delete "$2" < /dev/null > /dev/null 2>&1 || :
+}
+
+# The CLI services a preset may name; any other second field is the preset it extends.
+mdciCliServices=" claude copilot grok gemini scaleway standard-v1 claude-native copilot-native grok-native "
+
+# MDCI_SPAWN_PRESETS: words <name>:<cli service|preset it extends>:<model or macro>:<effort>, always four fields, an empty one writing nothing. The base presets first, so an extending one finds its parent.
+for mdciPass in base extending ; do
+	for mdciPreset in ${MDCI_SPAWN_PRESETS:-} ; do
+		case "$mdciPreset" in
+			*:*:*:*:*|*[!a-z0-9.:_-]*|:*) [ "$mdciPass" = extending ] || echo "🙋 WARNING: mdci:spawn: preset entry $mdciPreset is not <name>:<from>:<model>:<effort>, skipped" >&2 ; continue ;;
+			*:*:*:*) ;;
+			*) [ "$mdciPass" = extending ] || echo "🙋 WARNING: mdci:spawn: preset entry $mdciPreset is not <name>:<from>:<model>:<effort>, skipped" >&2 ; continue ;;
+		esac
+		mdciName="${mdciPreset%%:*}" ; mdciRest="${mdciPreset#*:}"
+		mdciFrom="${mdciRest%%:*}" ; mdciRest="${mdciRest#*:}"
+		mdciModel="${mdciRest%%:*}" ; mdciEffort="${mdciRest#*:}"
+		case "$mdciCliServices" in
+			*" $mdciFrom "*) [ "$mdciPass" = base ] || continue ; MdciUpsertSetting "preset-$mdciName" PRESET_CLI_SERVICE "$mdciFrom" ;;
+			*) [ "$mdciPass" = extending ] || continue ; MdciUpsertSetting "preset-$mdciName" PRESET_EXTEND "$mdciFrom" ;;
+		esac
+		MdciUpsertSetting "preset-$mdciName" PRESET_MODEL_OR_MACRO "$mdciModel"
+		MdciUpsertSetting "preset-$mdciName" PRESET_EFFORT "$mdciEffort"
+		[ "$mdciPass" = base ] || continue
+		# A base preset's credentials are MDCI_PRESET_<NAME>_<KEY>, the name upper case with dashes as underscores; only the names are listed here.
+		mdciVar="$( printf '%s' "$mdciName" | tr 'a-z-' 'A-Z_' )"
+		for mdciKey in $( env | sed -n "s/^MDCI_PRESET_${mdciVar}_\([A-Z][A-Z0-9_]*\)=.*/\1/p" ) ; do
+			eval "mdciValue=\"\${MDCI_PRESET_${mdciVar}_${mdciKey}:-}\""
+			[ -n "$mdciValue" ] || continue
+			MdciUpsertSetting "preset-$mdciName" "$mdciKey" "$mdciValue"
+			# A credential a preset carries is no team setting (F10.3).
+			MdciDeleteSetting magic-team "$mdciKey"
+		done
+	done
+done
+
+# The team's three tiers, each `<preset>[:<effort>]`. No SPAWN_CLI_SERVICE: the presets carry the service, and an old one is taken out.
+MdciDeleteSetting magic-team SPAWN_CLI_SERVICE
+MdciUpsertSetting magic-team SPAWN_TIER_LOW "${MDCI_SPAWN_TIER_LOW:-}"
+MdciUpsertSetting magic-team SPAWN_TIER_NORMAL "${MDCI_SPAWN_TIER_NORMAL:-}"
+MdciUpsertSetting magic-team SPAWN_TIER_HIGH "${MDCI_SPAWN_TIER_HIGH:-}"
+[ -n "${MDCI_SPAWN_TIER_NORMAL:-}" ] || echo "🙋 WARNING: mdci:spawn: this instance declares no MDCI_SPAWN_TIER_NORMAL, the team has no default preset" >&2
+
+# Explicit, because the main loop refuses to run without the console this writes.
+sudo -u "$MDCI_ACCOUNT" -H -s "$mdciTools" --make-workspace-integrations || \
+	echo "🙋 WARNING: mdci:spawn: --make-workspace-integrations did not complete (exit $?)" >&2

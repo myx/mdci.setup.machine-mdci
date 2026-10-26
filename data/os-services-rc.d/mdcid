@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# PROVIDE: mdcid
+# REQUIRE: LOGIN DAEMON FILESYSTEMS
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="mdcid"
+rcvar="mdcid_enable"
+
+mdcid_enable="${mdcid_enable:-"NO"}"
+mdcid_user="${mdcid_user:-"mdci"}"
+mdcid_group="${mdcid_group:-"mdci"}"
+
+pidfile="/usr/local/mdci/.daemon.pid"
+
+export HOME="/usr/local/mdci"
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+export MDAT_MAIN_LOOP_PROGRESS_FILE="/usr/local/mdci/.daemon.progress"
+
+command="/usr/sbin/daemon"
+
+load_rc_config $name
+
+# The workspace is workspace.mdci in the home, found by that path.
+mdcid_workspace="/usr/local/mdci/workspace.mdci"
+mdcid_chdir="$mdcid_workspace"
+mdcid_command="$mdcid_workspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh"
+export MMDAPP="$mdcid_workspace"
+
+command_args="-P ${pidfile} -r -f -S -T mdci ${mdcid_command} --intern-main-loop --run"
+
+required_files="${mdcid_command}"
+
+start_precmd="touch $pidfile $MDAT_MAIN_LOOP_PROGRESS_FILE ; chown ${mdcid_user} $pidfile $MDAT_MAIN_LOOP_PROGRESS_FILE ; chmod 644 $pidfile $MDAT_MAIN_LOOP_PROGRESS_FILE"
+
+run_rc_command "$1"
