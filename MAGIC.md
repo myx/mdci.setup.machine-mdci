@@ -5,10 +5,17 @@ Team-owned rules for `mdci`, the universal team rig installer: it gives a FreeBS
 ## What the machine is
 
 - A host gets one configurable main workspace, the installed `myx.distro-agents`, and `mdcid`, a daemon running `--intern-main-loop --run`.
-- The account home `MDCI_HOME` is the account home only: its keys, credentials, user settings, machine registries and the service files of `mdcid`. The main workspace is `workspace.mdci` inside it, found at that path and never by a setting; the home itself is never a workspace. Further workspaces, when a rig has any, live beside it in `Workspaces/<name>`.
+- The account home `MDCI_HOME` is the account home only: its keys, credentials, user settings, machine registries and the service files of `mdcid`. The main workspace is `workspace.mdci` inside it, found at that path and never by a setting; the home itself is never a workspace. Further workspaces, when a rig has any, live in a subdirectory of the home, `workspaces/<name>`, and never beside `workspace.mdci`.
 - The machine carries no build farm: no actions, no settings catalogue, no sh-lib of its own on the host.
 - The machine names no source of its own. A dependent project names its roots in `MDCI_SOURCE_ROOTS` and its repositories in `MDCI_SOURCE_REPOS`, and `3.sources` syncs them; with neither the workspace stays empty. The team reaches the rig through the `skillset/` directory inside the installed `myx.distro-agents`.
 - The installer installs `myx.common`, so the fragments call it without a check.
+
+## Extra workspaces
+
+- Each one is a second run of the same workspace installer, with `TGT_APP_PATH` naming its directory. No fragment, command or variable in this package creates or addresses a second workspace.
+- Member links are made per workspace: `--install-workspace-integrations --scope workspace` in `6.workspace` links that workspace's own bundled members inside it.
+- A `--scope user-home` run writes the links into the account's `.claude/skills` instead, and the first workspace to claim a slot keeps it. Only a workspace holding that member in its own `source/` relinks one.
+- A rig holds its members as a bundle, so no run of it relinks the home's slots. The home keeps the workspace that claimed them, and no step says so.
 
 ## The machine holds the machine; the dependent project holds the identity
 
@@ -49,7 +56,8 @@ Team-owned rules for `mdci`, the universal team rig installer: it gives a FreeBS
 ### Variables, not literals
 
 - Fragments use variables only: `MDCI_HOME`, `MDCI_ACCOUNT` and the rest. No fragment holds a literal install path.
-- Deployed files — the rc.d script, the os-commands, `monitrc-mdci.conf` — carry the default path `/usr/local/mdci` literally and know nothing of variables.
+- The rc.d script, `monitrc-mdci.conf` and `mdci-daemon-progress` carry the default path `/usr/local/mdci` literally and read no variable.
+- The other os-commands open with `MDCI_HOME="${MDCI_HOME:-/usr/local/mdci}"`: the literal is the default, and the operator's `MDCI_HOME` overrides it.
 
 ### Comments and prose
 
