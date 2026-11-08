@@ -25,7 +25,7 @@ MdciDeleteSetting() {
 }
 
 # The CLI services a preset may name; any other second field is the preset it extends.
-mdciCliServices=" claude copilot grok gemini scaleway standard-v1 claude-native copilot-native grok-native "
+mdciCliServices=" claude copilot grok gemini scaleway standard-v1 deepseek local claude-native copilot-native grok-native "
 
 # MDCI_SPAWN_PRESETS: words <name>:<cli service|preset it extends>:<model or macro>:<effort>, always four fields, an empty one writing nothing. The base presets first, so an extending one finds its parent.
 for mdciPass in base extending ; do
