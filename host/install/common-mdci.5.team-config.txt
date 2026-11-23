@@ -24,6 +24,9 @@ MdciUpsertSetting() {
 # The team scope. The spawn service, the presets with their credentials and the tiers are 7.spawn's.
 MdciUpsertSetting magic-team TEAM_DATA_GIT_REMOTE "${MDCI_TEAM_DATA_GIT_REMOTE:-}"
 MdciUpsertSetting magic-team TEAM_DATA_BRANCH "${MDCI_TEAM_DATA_BRANCH:-}"
+# The author of the team-data commits, written into that repository only: a store with no author fails every commit the tooling makes.
+MdciUpsertSetting magic-team TEAM_DATA_GIT_USER_NAME "${MDCI_TEAM_DATA_GIT_USER_NAME:-}"
+MdciUpsertSetting magic-team TEAM_DATA_GIT_USER_EMAIL "${MDCI_TEAM_DATA_GIT_USER_EMAIL:-}"
 MdciUpsertSetting magic-team SLACK_APP_TOKEN "${MDCI_SLACK_APP_TOKEN:-}"
 MdciUpsertSetting magic-team SLACK_CHANNEL_MAGIC_TEAM "${MDCI_SLACK_CHANNEL_MAGIC_TEAM:-}"
 MdciUpsertSetting magic-team SLACK_CHANNEL_HUMAN_OWNER "${MDCI_SLACK_CHANNEL_HUMAN_OWNER:-}"

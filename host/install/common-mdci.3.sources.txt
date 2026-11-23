@@ -95,3 +95,17 @@ if [ -n "$( find "$mdciWorkspace/source" -maxdepth 3 -name .git -type d 2> /dev/
 elif [ -z "$mdciUnreadable" ] ; then
 	echo "🙋 WARNING: mdci:sources: no repository is in the workspace, source prepare and pull was skipped" >&2
 fi
+
+# The features and the builders are read from the origin by absolute path, and a rig origin is its .local.
+mdciFeatures="$mdciWorkspace/.local/myx/mdci-packages-myx"
+if [ -d "$mdciWorkspace/source/myx" ] ; then
+	mkdir -p "$mdciFeatures" || echo "🙋 WARNING: mdci:sources: could not create $mdciFeatures (exit $?)" >&2
+	for mdciFamilyDir in "$mdciWorkspace/source/myx"/mdci.* ; do
+		[ -d "$mdciFamilyDir" ] || continue
+		mdciFamilyName="${mdciFamilyDir##*/}"
+		cp -R "$mdciFamilyDir" "$mdciFeatures/${mdciFamilyName#mdci.}" || \
+			echo "🙋 WARNING: mdci:sources: could not place $mdciFamilyName in $mdciFeatures (exit $?)" >&2
+	done
+	[ -d "$mdciFeatures" ] && chown -R "${MDCI_ACCOUNT}:${MDCI_ACCOUNT}" "$mdciFeatures" 2> /dev/null || \
+		echo "🙋 WARNING: mdci:sources: could not give $mdciFeatures to ${MDCI_ACCOUNT} (exit $?)" >&2
+fi

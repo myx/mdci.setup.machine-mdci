@@ -87,6 +87,35 @@ On the host, in `/usr/local/sbin`:
 
 Use `mdci-daemon-disable` to stop the daemon. A plain `service mdcid stop` is undone by monit.
 
+## Git access
+
+The account `MDCI_ACCOUNT` reaches git with the rig's own deploy key. The project that requires this one supplies the key in its `data/deploy-keys/`, as `data/deploy-keys/README.md` describes. An operator sets it up once per key:
+
+1. Make the pair in that project: `ssh-keygen -t ed25519 -N '' -C '<date>@<role>-<namespace>' -f data/deploy-keys/mdci`. The file is named after `MDCI_ACCOUNT`.
+2. Write `data/deploy-keys/known_hosts` with the host keys of every git server the rig uses. Check each key against the fingerprints the server publishes, never against `ssh-keyscan` alone.
+3. Register `mdci.pub` on each repository that needs it: write access on the team-data remote, read access on every private source repository.
+4. Deploy, then run `mdci-public-keys` on the host. It checks the repositories in `MDCI_SOURCE_REPOS` only. A repository that a synced registry names is not in its check.
+
+Repositories under `github.com/myx/` and `github.com/myx-distro-libs/` need no key. The `prepare` step rewrites their `git@` remotes to public HTTPS.
+
+GitHub accepts one key as a deploy key on one repository only. Where the rig needs more than one private GitHub repository, register the key on a machine user that has access to all of them. This is GitHub's rule, not checked against its current documentation here.
+
+On a rig that is already installed:
+
+1. Run `mdci-public-keys` on the host as root. It prints the public key and which declared repositories it can read now.
+2. Register that key where step 3 above says.
+3. Run `DeployProjectSsh` on the instance project again. The `sources` step clones what the key can now read, then prepares and pulls the registries.
+
+The `deploy-keys` step then sets, for the account:
+
+- `core.sshCommand`: the key, that `known_hosts`, `StrictHostKeyChecking=yes` and `GlobalKnownHostsFile=/dev/null`.
+- `pull.rebase false`.
+- a managed block in `$MDCI_HOME/.ssh/config`, with the same key for `github.com` and `bitbucket.org`.
+
+With no deploy key, the `sources` step generates `$MDCI_HOME/.ssh/id_ed25519` and prints its public key in a warning.
+
+No step sets `user.name` or `user.email` for the account, so a commit the rig makes has no author identity.
+
 ## Sessions
 
 - The account and each `USER_LIST` user get a console session in each new screen window: the Source console of `workspace.mdci`, started by the last line of their `.bash_profile`. That line sits below the login line of `myx.common`, which starts screen first.

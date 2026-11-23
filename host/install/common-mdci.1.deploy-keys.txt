@@ -19,6 +19,59 @@ if [ ! -d "$mdciKeysStaged" ] ; then
 	exit 0
 fi
 
+# A key the landing already holds is the one the forge lists: it enters the staging folder first, so this run keeps it.
+for mdciKeyName in "$MDCI_ACCOUNT" "$MDCI_ACCOUNT.pub" known_hosts ; do
+	if [ ! -f "$mdciKeysStaged/$mdciKeyName" ] && [ -f "$mdciKeysHome/$mdciKeyName" ] ; then
+		cp -p "$mdciKeysHome/$mdciKeyName" "$mdciKeysStaged/$mdciKeyName" || \
+			echo "🙋 WARNING: mdci:deploy-keys: could not keep $mdciKeysHome/$mdciKeyName (exit $?)" >&2
+	fi
+done
+
+# A missing part of the key material is made in the staging folder, before the sync below reads it: that sync deletes every file the staging folder does not hold.
+mdciBoardRemote="${MDCI_TEAM_DATA_GIT_REMOTE:-}"
+mdciNamespace="${MDCI_NAMESPACE:-${mdciBoardRemote##*/}}"
+mdciNamespace="${mdciNamespace%.git}"
+case "$mdciNamespace" in
+	magic-team-board) mdciNamespace= ;;
+	magic-team-board-*) mdciNamespace="${mdciNamespace#magic-team-board-}" ;;
+esac
+[ -n "$mdciNamespace" ] || mdciNamespace="$MDCI_ACCOUNT"
+mdciKeyComment="magic-team-board-$mdciNamespace"
+
+if [ ! -f "$mdciKeysStaged/$MDCI_ACCOUNT" ] ; then
+	echo "mdci:deploy-keys: making the key $mdciKeysStaged/$MDCI_ACCOUNT" >&2
+	ssh-keygen -t ed25519 -N '' -C "$mdciKeyComment" -f "$mdciKeysStaged/$MDCI_ACCOUNT" > /dev/null || \
+		echo "🙋 WARNING: mdci:deploy-keys: could not make the deploy key $mdciKeysStaged/$MDCI_ACCOUNT (exit $?)" >&2
+fi
+
+# A key that arrived without its public half keeps its private half byte for byte, and the public half is derived from it.
+if [ ! -f "$mdciKeysStaged/$MDCI_ACCOUNT.pub" ] && [ -f "$mdciKeysStaged/$MDCI_ACCOUNT" ] ; then
+	if ssh-keygen -y -f "$mdciKeysStaged/$MDCI_ACCOUNT" > "$mdciKeysStaged/$MDCI_ACCOUNT.pub.mdci.$$" 2> /dev/null && [ -s "$mdciKeysStaged/$MDCI_ACCOUNT.pub.mdci.$$" ] ; then
+		mv "$mdciKeysStaged/$MDCI_ACCOUNT.pub.mdci.$$" "$mdciKeysStaged/$MDCI_ACCOUNT.pub" || \
+			echo "🙋 WARNING: mdci:deploy-keys: could not place $mdciKeysStaged/$MDCI_ACCOUNT.pub (exit $?)" >&2
+	else
+		rm -f "$mdciKeysStaged/$MDCI_ACCOUNT.pub.mdci.$$"
+		echo "🙋 WARNING: mdci:deploy-keys: no public half could be derived from $mdciKeysStaged/$MDCI_ACCOUNT (exit $?)" >&2
+	fi
+fi
+
+# The three git forge hosts are pinned, so a clone meets a host key this machine already holds.
+if [ ! -f "$mdciKeysStaged/known_hosts" ] ; then
+	if ssh-keyscan github.com bitbucket.org ssh.bitbucket.org > "$mdciKeysStaged/known_hosts.mdci.$$" 2> /dev/null && [ -s "$mdciKeysStaged/known_hosts.mdci.$$" ] ; then
+		mv "$mdciKeysStaged/known_hosts.mdci.$$" "$mdciKeysStaged/known_hosts" || \
+			echo "🙋 WARNING: mdci:deploy-keys: could not place $mdciKeysStaged/known_hosts (exit $?)" >&2
+	else
+		rm -f "$mdciKeysStaged/known_hosts.mdci.$$"
+		echo "🙋 WARNING: mdci:deploy-keys: the host keys of the git forge could not be pinned, $mdciKeysStaged/known_hosts stays absent" >&2
+	fi
+fi
+
+# Printed before the sync, so it reaches the reader even when the sync fails: naming the key on the forge is a step of the human-owner.
+if [ -f "$mdciKeysStaged/$MDCI_ACCOUNT.pub" ] ; then
+	echo "mdci:deploy-keys: public key of $mdciKeysStaged/$MDCI_ACCOUNT: $( cat "$mdciKeysStaged/$MDCI_ACCOUNT.pub" )" >&2
+	echo "mdci:deploy-keys: this public key must be listed as a deploy key with write access on the team-data repository and read access on every source repository: the deploy does not list it" >&2
+fi
+
 echo "mdci:deploy-keys: syncing $mdciKeysStaged" >&2
 mkdir -p "$mdciKeysHome" || echo "🙋 WARNING: mdci:deploy-keys: could not create $mdciKeysHome (exit $?)" >&2
 # The second hop sets the mode and owner the staging sync cannot, so a private key is never group readable.

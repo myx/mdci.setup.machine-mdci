@@ -32,3 +32,13 @@ printf "agents exec true\n" | ( cd "$mdciWorkspace" && sudo -u "$MDCI_ACCOUNT" -
 	ls -la "$mdciWorkspace/.local/myx" >&2 || :
 	exit 1
 }
+
+# LanceDB and its embedding model live in the workspace, not on the host: the environment is the one the knowledge tool reads, in
+# $mdciWorkspace/.local/lancedb. Ran as the account, so the environment belongs to it. A failure leaves the team working without a store.
+if [ -f "$mdciWorkspace/.local/myx/mdci-packages-myx/setup.feature-lancedb/host/install/feature-lancedb.install.txt" ] ; then
+	echo "mdci:agents: installing LanceDB and its embedding model" >&2
+	sudo -u "$MDCI_ACCOUNT" -H -s "$mdciWorkspace/.local/myx/myx.distro-agents/sh-scripts/DistroAgentsTools.fn.sh" --install-knowledge-store || \
+		echo "🙋 WARNING: mdci:agents: the knowledge store did not install (exit $?), the team works without it" >&2
+else
+	echo "🙋 WARNING: mdci:agents: setup.feature-lancedb is not in the workspace, the knowledge store was not installed" >&2
+fi

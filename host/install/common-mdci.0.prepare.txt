@@ -35,7 +35,7 @@ for mdciUserName in $MDCI_ACCOUNT ${USER_LIST:-} ; do
 		"# removed by mdci-setup ### MMDAPP console autostart ###" || MdciStop "retiring the .profile autostart of $mdciUserName" "$?"
 	# After setup/client on every deploy: replaceLine removes the line it matches and appends the new one, so the console line is the last of the profile, below the login line of setup/console that starts screen. MMDAPP is on the line because a sourced console cannot find its own folder.
 	sudo -u "$mdciUserName" -H -s myx.common lib/replaceLine '$HOME/.bash_profile' ' ### MMDAPP console autostart ###$' \
-		"test -x ${mdciWorkspace}/DistroSourceConsole.sh && MMDAPP=${mdciWorkspace} && . ${mdciWorkspace}/DistroSourceConsole.sh ### MMDAPP console autostart ###" || MdciStop "writing the .bash_profile autostart of $mdciUserName" "$?"
+		"printenv TERM | grep -q -x screen && test -x ${mdciWorkspace}/DistroSourceConsole.sh && MMDAPP=${mdciWorkspace} && . ${mdciWorkspace}/DistroSourceConsole.sh ### MMDAPP console autostart ###" || MdciStop "writing the .bash_profile autostart of $mdciUserName" "$?"
 done
 
 myx.common lib/installAuthorizedKey "$MDCI_ACCOUNT" "${MDCI_PKEY}" || MdciStop "installing the authorized key of $MDCI_ACCOUNT" "$?"

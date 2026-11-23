@@ -4,6 +4,8 @@ Requires: \
 	standard/setup.machine-freebsd \
 	standard/setup.feature-myx.common \
 	standard/setup.feature-monit \
+	standard/setup.feature-local-ai \
+	standard/setup.feature-lancedb \
 
 Provides: \
 	standard/setup.machine-mdci \
@@ -15,6 +17,10 @@ Provides: \
 	image-install:context-variable:MDCI_ACCOUNT:create:mdci \
 	image-install:context-variable:MDCI_ACCOUNT_UID:create:181 \
 	image-install:context-variable:MDCI_SPAWN_CLI_SERVICE:create:scaleway \
+	\
+	image-install:context-variable:MDCI_SOURCE_REPOS:insert:myx/mdci.setup.feature-lancedb,https://github.com/myx/mdci.setup.feature-lancedb.git \
+	image-install:context-variable:MDCI_SOURCE_REPOS:insert:myx/mdci.setup.feature-local-ai,https://github.com/myx/mdci.setup.feature-local-ai.git \
+	image-install:context-variable:MDCI_SOURCE_REPOS:insert:myx/mdci.build.feature-java.compile,https://github.com/myx/mdci.build.feature-java.compile.git \
 	\
 	image-install:context-variable:MDCI_EMAIL_IMAP_HOST:create:imap.gmail.com \
 	image-install:context-variable:MDCI_EMAIL_SMTP_HOST:create:smtp.gmail.com \
