@@ -35,6 +35,10 @@ case "$rigName" in
 		/bin/mkdir -p "$rigSrc" 2> /dev/null
 		cp -R "$rigDst/." "$rigSrc/" 2> /dev/null
 	;;
+	ssh-keyscan)
+		## Each forge host with one key line, as a real scan prints them: the fragments only check the file is not empty.
+		for rigHost ; do printf '%s ssh-ed25519 AAAA%s\n' "$rigHost" "${rigHost%%.*}" ; done
+	;;
 	ssh-keygen)
 		rigOut= rigDerive=
 		while [ $# -gt 0 ] ; do

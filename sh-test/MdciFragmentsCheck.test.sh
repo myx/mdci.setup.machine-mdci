@@ -265,7 +265,7 @@ rigAssert "control: a wrong order trips it"                              "$( rig
 
 ## ---- the dynamic rig ----
 mkdir -p "$rigTmp/stubs"
-for rigCmd in sudo chown chflags mkdir rsync fetch myx.common sysrc service monit git ssh-keygen bash id ; do
+for rigCmd in sudo chown chflags mkdir rsync fetch myx.common sysrc service monit git ssh-keygen ssh-keyscan bash id ; do
 	cp "$rigFixtures/mdci-fragments-check.command.test.sh" "$rigTmp/stubs/$rigCmd" && chmod +x "$rigTmp/stubs/$rigCmd"
 done
 rigNew(){ ## name -- a fresh MDCI_HOME whose workspace.mdci has the console and the agents tooling in place, an empty log; sets rigHome and rigWs
@@ -282,7 +282,7 @@ rigRun(){ ## name, shell, fragment, NAME=value... -- rc in rigRc, output (stdout
 	rigRc=0
 	env -i PATH="$rigTmp/stubs:/bin:/usr/bin" HOME="$rigTmp" MDCI_HOME="$rigHome" MDCI_ACCOUNT=acct MDCI_ACCOUNT_UID=181 MDCI_PKEY=rig-public-key RIG_LOG="$rigTmp/$runName/log" RIG_TMP="$rigTmp" RIG_NAME="$runName" RIG_HOME="$runHome" "$@" \
 		/bin/sh -c '
-			for t in sudo chown mkdir chflags myx.common git ssh-keygen ; do case "$( command -v $t )" in "$RIG_TMP"/*) ;; *) exit 99 ;; esac ; done
+			for t in sudo chown mkdir chflags myx.common git ssh-keygen ssh-keyscan ; do case "$( command -v $t )" in "$RIG_TMP"/*) ;; *) exit 99 ;; esac ; done
 			case "$RIG_HOME" in "$RIG_TMP"/*) ;; *) exit 99 ;; esac
 			[ -z "${RIG_UNSET:-}" ] || unset "$RIG_UNSET"
 			cd "$RIG_TMP/$RIG_NAME" && exec "$0" ${RIG_SHFLAGS:-} "$1" ${RIG_ARGS:-}
@@ -315,7 +315,7 @@ rigAllFail(){ ## shell -- every stubbed command fails; the fragments that only w
 	rigAssert "[$sn] and nothing ran after it: one myx.common call, no git" "$( rigHas "$sn-a0" 'myx.common' ) $( rigHas "$sn-a0" 'git' )" "1 0"
 	mkdir -p "$rigTmp/staged-a1/mdci-deploy-keys"
 	rigT "$sn-a1" "$1" "$( rigFile 1 deploy-keys )" RIG_ALLFAIL=1 MDCI_FILES_PATH="$rigTmp/staged-a1"
-	rigAssert "[$sn] 1.deploy-keys: exit 0 and six named warnings"        "$rigRc $( rigWarn "$sn-a1" )" "0 6"
+	rigAssert "[$sn] 1.deploy-keys: exit 0 and eight named warnings"       "$rigRc $( rigWarn "$sn-a1" )" "0 8"
 	rigNew "$sn-a2" ; rm -f "$rigWs/DistroSourceConsole.sh" ; rigRun "$sn-a2" "$1" "$( rigFile 2 install )" RIG_ALLFAIL=1
 	rigAssert "[$sn] 2.install: it stops, non-zero, with its own ERROR line" "$( rigStopped "$rigRc" ) $( rigErr "$sn-a2" )" "stopped 1"
 	rigT "$sn-a3" "$1" "$( rigFile 3 sources )" RIG_ALLFAIL=1 RIG_CONSOLE_FAIL=1 MDCI_SOURCE_ROOTS=rootA 'MDCI_SOURCE_REPOS=proj-here,git@rig:proj-here.git'
@@ -423,10 +423,10 @@ rigBehaviour(){ ## shell -- each fragment in the cases that matter
 	rigAssert "[$sn] the sync fails: exit 0, a warning with the exit status, the later steps still ran" "$rigRc $( rigOut "$sn-d3" 'the sync into' ) $( rigHas "$sn-d3" 'chown -R' )" "0 1 1"
 	rigStaged2="$rigTmp/files2-$sn" ; mkdir -p "$rigStaged2/mdci-deploy-keys" ; printf 'secret\n' > "$rigStaged2/mdci-deploy-keys/acct"
 	rigT "$sn-d4" "$1" "$( rigFile 1 deploy-keys )" MDCI_FILES_PATH="$rigStaged2"
-	rigAssert "[$sn] known_hosts missing: exit 0 and one warning about it"  "$rigRc $( rigOut "$sn-d4" 'known_hosts is missing' ) $( rigWarn "$sn-d4" )" "0 1 1"
+	rigAssert "[$sn] known_hosts absent: ssh-keyscan pins the three forge hosts into it, exit 0, no warning" "$rigRc $( rigHas "$sn-d4" 'ssh-keyscan github.com bitbucket.org ssh.bitbucket.org' ) $( [ -s "$rigStaged2/mdci-deploy-keys/known_hosts" ] && printf pinned ) $( rigOut "$sn-d4" 'known_hosts is missing' ) $( rigWarn "$sn-d4" )" "0 1 pinned 0 0"
 	rigStaged3="$rigTmp/files3-$sn" ; mkdir -p "$rigStaged3/mdci-deploy-keys" ; printf 'host key\n' > "$rigStaged3/mdci-deploy-keys/known_hosts"
 	rigT "$sn-d5" "$1" "$( rigFile 1 deploy-keys )" MDCI_FILES_PATH="$rigStaged3"
-	rigAssert "[$sn] the private key missing: exit 0, a warning, no git ssh command" "$rigRc $( rigOut "$sn-d5" 'private key' ) $( rigHas "$sn-d5" 'core.sshCommand' )" "0 1 0"
+	rigAssert "[$sn] the private key absent: one is made, its public half printed, the git ssh command set" "$rigRc $( rigOut "$sn-d5" 'making the key' ) $( rigOut "$sn-d5" 'public key of' ) $( rigHas "$sn-d5" 'core.sshCommand' )" "0 1 1 1"
 	rigT "$sn-d6" "$1" "$( rigFile 1 deploy-keys )" MDCI_FILES_PATH="$rigStaged" RIG_FAIL=git
 	rigAssert "[$sn] the git setting fails: exit 0 and one warning naming it" "$rigRc $( rigOut "$sn-d6" 'setting the git ssh command' )" "0 1"
 
@@ -606,7 +606,7 @@ if [ -z "$rigReplaceLine" ] || [ ! -f "$rigReplaceLine" ] ; then
 	echo "   skipped: myx.common is not on PATH, so the real lib/replaceLine could not be run"
 else
 	mkdir -p "$rigTmp/stubs-profile"
-	for rigCmd in sudo chown chflags mkdir rsync fetch sysrc service monit git ssh-keygen bash ; do
+	for rigCmd in sudo chown chflags mkdir rsync fetch sysrc service monit git ssh-keygen ssh-keyscan bash ; do
 		cp "$rigFixtures/mdci-fragments-check.command.test.sh" "$rigTmp/stubs-profile/$rigCmd" && chmod +x "$rigTmp/stubs-profile/$rigCmd"
 	done
 	cp "$rigFixtures/mdci-fragments-check.profile.test.sh" "$rigTmp/stubs-profile/myx.common" && chmod +x "$rigTmp/stubs-profile/myx.common"

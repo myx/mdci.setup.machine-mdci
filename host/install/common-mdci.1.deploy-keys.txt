@@ -105,7 +105,7 @@ fi
 # The same key for a plain ssh, which a tool that sets GIT_SSH_COMMAND itself uses instead of core.sshCommand: one managed block of the account's ssh config, replaced on every run.
 mdciSshConfig="$MDCI_HOME/.ssh/config"
 mdciSshBlock="# mdci:deploy-keys managed block, rewritten by every deploy
-Host github.com bitbucket.org
+Host github.com bitbucket.org ssh.bitbucket.org
 	IdentityFile $mdciKeysHome/$MDCI_ACCOUNT
 	IdentitiesOnly yes
 	UserKnownHostsFile $mdciKeysHome/known_hosts

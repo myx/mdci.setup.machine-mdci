@@ -60,14 +60,14 @@ Required, with no default:
 Optional:
 
 - Sources: `MDCI_SOURCE_ROOTS` (space separated), `MDCI_SOURCE_REPOS` (`project,url` entries).
-- Team data: `MDCI_TEAM_DATA_GIT_REMOTE`, `MDCI_TEAM_DATA_BRANCH`, `MDCI_TEAM_DATA_DIRECTORY`.
+- Team data: `MDCI_TEAM_DATA_GIT_REMOTE`, `MDCI_TEAM_DATA_BRANCH`, `MDCI_TEAM_DATA_DIRECTORY`, and the author of its commits, `MDCI_TEAM_DATA_GIT_USER_NAME` and `MDCI_TEAM_DATA_GIT_USER_EMAIL`.
 - Slack: `MDCI_SLACK_CHANNEL_MAGIC_TEAM` and `MDCI_SLACK_CHANNEL_HUMAN_OWNER` (both needed for the Slack setup), `MDCI_SLACK_CHANNEL_EVENT_TRACK`, `MDCI_SLACK_CHANNEL_EVENT_ALERT`, `MDCI_SLACK_APP_TOKEN`, `MDCI_SLACK_BOT_TOKEN`, `MDCI_SLACK_WORKSPACE_DOMAIN`.
 - Spawn credentials: `MDCI_SCALEWAY_DEEPSEEK`, `MDCI_SCALEWAY_GEMMA` (scaleway); `MDCI_ANTHROPIC_API_KEY`, `MDCI_CLAUDE_CODE_OAUTH_TOKEN` (claude); `MDCI_COPILOT_GITHUB_TOKEN` (copilot). `MDCI_XAI_API_KEY` is stored for the team; no `MDCI_SPAWN_CLI_SERVICE` value selects it.
 - Confluence: `MDCI_CONFLUENCE_SPACE`, the key of the team space.
 - Members: `MDCI_TEAM_MEMBERS` (names: lower case letters, digits, dashes). Each member key is read from `MDCI_<MEMBER>_<KEY>` (dashes as underscores), else from the flat `MDCI_<KEY>`. Keys: `SLACK_USER_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_WORKSPACE_DOMAIN`, `EMAIL_IMAP_HOST`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_USER`, `EMAIL_APP_PASSWORD`, `TRELLO_KEY`, `TRELLO_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `CONFLUENCE_SITE`, `CONFLUENCE_USER`, `CONFLUENCE_API_TOKEN`. The two Slack bot keys have no flat form. The `human-owner` scope takes its one setting from `MDCI_HUMAN_OWNER_EMAIL_USER`.
 - `USER_LIST` — the users of the host, filled by the account projects it requires. Each joins the account group and gets the console line.
 
-Deployed file, not a variable: `data/deploy-keys/mdci` (private key), `mdci.pub`, `known_hosts`, supplied by the project that requires this one.
+Deployed files, not variables: `data/deploy-keys/mdci` (private key), `mdci.pub`, `known_hosts`. The project that requires this one may supply them. The `deploy-keys` step makes each one it does not supply.
 
 ## Commands
 
@@ -89,32 +89,33 @@ Use `mdci-daemon-disable` to stop the daemon. A plain `service mdcid stop` is un
 
 ## Git access
 
-The account `MDCI_ACCOUNT` reaches git with the rig's own deploy key. The project that requires this one supplies the key in its `data/deploy-keys/`, as `data/deploy-keys/README.md` describes. An operator sets it up once per key:
+The account `MDCI_ACCOUNT` reaches git with the rig's own deploy key, in `$MDCI_HOME/deploy-keys`. The `deploy-keys` step provides it:
 
-1. Make the pair in that project: `ssh-keygen -t ed25519 -N '' -C '<date>@<role>-<namespace>' -f data/deploy-keys/mdci`. The file is named after `MDCI_ACCOUNT`.
-2. Write `data/deploy-keys/known_hosts` with the host keys of every git server the rig uses. Check each key against the fingerprints the server publishes, never against `ssh-keyscan` alone.
-3. Register `mdci.pub` on each repository that needs it: write access on the team-data remote, read access on every private source repository.
-4. Deploy, then run `mdci-public-keys` on the host. It checks the repositories in `MDCI_SOURCE_REPOS` only. A repository that a synced registry names is not in its check.
+- The key is named after `MDCI_ACCOUNT`. A key held there already is kept, and so is one that the project requiring this one supplies in its `data/deploy-keys/`, as `data/deploy-keys/README.md` describes.
+- With no key, the step makes an ed25519 pair with the comment `magic-team-board-<namespace>`.
+- With no `known_hosts`, it pins the host keys of `github.com`, `bitbucket.org` and `ssh.bitbucket.org`.
+- Every deploy prints the public key.
+
+An operator lists the key once:
+
+1. Deploy, and take the public key that the `deploy-keys` step prints.
+2. Register it on each repository that needs it: write access on the team-data remote, read access on every private source repository.
+3. Run `mdci-public-keys` on the host as root. It prints the fingerprints of the pinned git servers, and which declared repositories and team-data remote the key reads now. Check each fingerprint against the ones the server publishes.
+4. Run `DeployProjectSsh` on the instance project again. The `sources` step clones what the key can now read, then prepares and pulls the registries.
 
 Repositories under `github.com/myx/` and `github.com/myx-distro-libs/` need no key. The `prepare` step rewrites their `git@` remotes to public HTTPS.
 
 GitHub accepts one key as a deploy key on one repository only. Where the rig needs more than one private GitHub repository, register the key on a machine user that has access to all of them. This is GitHub's rule, not checked against its current documentation here.
 
-On a rig that is already installed:
-
-1. Run `mdci-public-keys` on the host as root. It prints the public key and which declared repositories it can read now.
-2. Register that key where step 3 above says.
-3. Run `DeployProjectSsh` on the instance project again. The `sources` step clones what the key can now read, then prepares and pulls the registries.
-
 The `deploy-keys` step then sets, for the account:
 
 - `core.sshCommand`: the key, that `known_hosts`, `StrictHostKeyChecking=yes` and `GlobalKnownHostsFile=/dev/null`.
 - `pull.rebase false`.
-- a managed block in `$MDCI_HOME/.ssh/config`, with the same key for `github.com` and `bitbucket.org`.
+- a managed block in `$MDCI_HOME/.ssh/config`, with the same key for `github.com`, `bitbucket.org` and `ssh.bitbucket.org`.
 
 With no deploy key, the `sources` step generates `$MDCI_HOME/.ssh/id_ed25519` and prints its public key in a warning.
 
-No step sets `user.name` or `user.email` for the account, so a commit the rig makes has no author identity.
+Team-data commits carry the author `MDCI_TEAM_DATA_GIT_USER_NAME` and `MDCI_TEAM_DATA_GIT_USER_EMAIL`. The `team-config` step writes them to the team settings, and the tooling sets them in the team-data repository before it commits.
 
 ## Sessions
 

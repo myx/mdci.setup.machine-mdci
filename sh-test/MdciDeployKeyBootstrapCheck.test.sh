@@ -130,6 +130,8 @@ rigAssert "written where the fragment syncs from, at the account's own key name"
 rigAssert "its comment is magic-team-board-<ns> with a namespace after the dash" "$( rigCommentNames )" ok
 rigAssert "the host keys are pinned: the three hosts known_hosts must reach" \
 	"$( rigPinned "$rigLanding/known_hosts" )" "bitbucket.org github.com ssh.bitbucket.org"
+rigAssert "the account's ssh config gives the key to the three hosts known_hosts pins" \
+	"$( LC_ALL=C awk '/^Host / { $1 = "" ; sub( /^ /, "" ) ; print ; }' "$rigHome/.ssh/config" 2> /dev/null )" "github.com bitbucket.org ssh.bitbucket.org"
 rigAssert "the public half is printed, so it can be listed as a deploy key" \
 	"$( rigSaid absent 'GENERATED-KEY magic-team-board-' )" 1
 rigAssert "and the output says it must be listed as a deploy key"          "$( rigSaid absent 'deploy key' )" 1
